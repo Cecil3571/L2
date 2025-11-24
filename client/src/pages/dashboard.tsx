@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Send, Upload, Terminal, Activity, Settings, Plus, Trash2, Zap, FileText, Download, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -118,7 +118,8 @@ export default function Dashboard() {
     }
   };
 
-  const createMessage = async (msg: Omit<Message, "id">) => {
+  const createMessage = useCallback(async (msg: Omit<Message, "id">) => {
+    if (!currentSessionId) return;
     try {
       const res = await fetch(`/api/sessions/${currentSessionId}/messages`, {
         method: "POST",
@@ -139,7 +140,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Failed to create message:", error);
     }
-  };
+  }, [currentSessionId, messages]);
 
   const uploadFile = async (file: File) => {
     try {
@@ -157,6 +158,39 @@ export default function Dashboard() {
     }
   };
 
+  const generateGenericResponse = (content: string, fullMode: boolean): string => {
+    const lower = content.toLowerCase();
+    if (lower.includes("buyer") || lower.includes("long")) {
+      return `> COACH READ\nBuyers are weak here. Don't chase.\nI see heavy offers stacking at the half-dollar.\nWait for the reclaim of the level before lifting.`;
+    }
+    if (lower.includes("seller") || lower.includes("short")) {
+      return `> COACH READ\nSellers are aggressive on the tape.\nBids are stepping down.\nLook for the flush below the round number.`;
+    }
+    return `> COACH READ\nUnderstood. Keep your eyes on the T&S.\nSpeed is increasing.\nWatch for the stuff move at the high of day.`;
+  };
+
+  const processCoachResponse = (userMsg: any, scenario?: Scenario) => {
+    setIsTyping(true);
+
+    setTimeout(async () => {
+      const responseContent = scenario 
+        ? (isFullReview ? scenario.fullResponse : scenario.tldrResponse)
+        : generateGenericResponse(userMsg.content, isFullReview);
+
+      const coachMsg: Omit<Message, "id"> = {
+        sessionId: currentSessionId,
+        role: "coach",
+        content: responseContent,
+        type: "analysis",
+        mode: isFullReview ? "full" : "tldr",
+        timestamp: new Date().toISOString(),
+      };
+
+      await createMessage(coachMsg);
+      setIsTyping(false);
+    }, 1200);
+  };
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: "smooth" });
@@ -165,7 +199,7 @@ export default function Dashboard() {
 
   // Handle paste events for screenshots
   useEffect(() => {
-    const handlePaste = async (e: ClipboardEvent) => {
+    const handlePaste = (e: ClipboardEvent) => {
       if (!currentSessionId) return;
       
       const items = e.clipboardData?.items;
@@ -178,7 +212,7 @@ export default function Dashboard() {
           if (!blob) return;
 
           const reader = new FileReader();
-          reader.onload = async (event) => {
+          reader.onload = (event) => {
             const imageData = event.target?.result as string;
             
             const userMsg = {
@@ -191,9 +225,13 @@ export default function Dashboard() {
               timestamp: new Date().toISOString(),
             };
 
-            await createMessage(userMsg);
-            processCoachResponse(userMsg);
-            toast({ title: "Screenshot pasted", description: "Processing image..." });
+            createMessage(userMsg).then(() => {
+              processCoachResponse(userMsg);
+              toast({ title: "Screenshot pasted", description: "Processing image..." });
+            }).catch(error => {
+              console.error("Failed to handle pasted screenshot:", error);
+              toast({ title: "Error", description: "Failed to process screenshot", variant: "destructive" });
+            });
           };
           reader.readAsDataURL(blob);
           break;
@@ -201,9 +239,9 @@ export default function Dashboard() {
       }
     };
 
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [currentSessionId]);
+    document.addEventListener("paste", handlePaste as EventListener);
+    return () => document.removeEventListener("paste", handlePaste as EventListener);
+  }, [currentSessionId, createMessage, toast]);
 
   const handleCreateSession = () => {
     const title = `Session ${new Date().toLocaleTimeString()}`;
@@ -266,39 +304,6 @@ export default function Dashboard() {
 
     await createMessage(userMsg);
     processCoachResponse(userMsg, scenario);
-  };
-
-  const processCoachResponse = (userMsg: any, scenario?: Scenario) => {
-    setIsTyping(true);
-
-    setTimeout(async () => {
-      const responseContent = scenario 
-        ? (isFullReview ? scenario.fullResponse : scenario.tldrResponse)
-        : generateGenericResponse(userMsg.content, isFullReview);
-
-      const coachMsg: Omit<Message, "id"> = {
-        sessionId: currentSessionId,
-        role: "coach",
-        content: responseContent,
-        type: "analysis",
-        mode: isFullReview ? "full" : "tldr",
-        timestamp: new Date().toISOString(),
-      };
-
-      await createMessage(coachMsg);
-      setIsTyping(false);
-    }, 1200);
-  };
-
-  const generateGenericResponse = (content: string, fullMode: boolean): string => {
-    const lower = content.toLowerCase();
-    if (lower.includes("buyer") || lower.includes("long")) {
-      return `> COACH READ\nBuyers are weak here. Don't chase.\nI see heavy offers stacking at the half-dollar.\nWait for the reclaim of the level before lifting.`;
-    }
-    if (lower.includes("seller") || lower.includes("short")) {
-      return `> COACH READ\nSellers are aggressive on the tape.\nBids are stepping down.\nLook for the flush below the round number.`;
-    }
-    return `> COACH READ\nUnderstood. Keep your eyes on the T&S.\nSpeed is increasing.\nWatch for the stuff move at the high of day.`;
   };
 
   const downloadTranscript = () => {

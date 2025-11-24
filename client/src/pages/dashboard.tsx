@@ -197,19 +197,18 @@ export default function Dashboard() {
     }
   }, [messages, isTyping]);
 
-  // Handle paste events for screenshots
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (!currentSessionId) return;
-      
-      const items = e.clipboardData?.items;
-      if (!items) return;
+  const handlePasteScreenshot = async () => {
+    if (!currentSessionId) {
+      toast({ title: "Error", description: "No session active", variant: "destructive" });
+      return;
+    }
 
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-          e.preventDefault();
-          const blob = items[i].getAsFile();
-          if (!blob) return;
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (item.types.includes("image/png") || item.types.includes("image/jpeg")) {
+          const blob = await item.getType("image/png").catch(() => item.getType("image/jpeg"));
+          if (!blob) continue;
 
           const reader = new FileReader();
           reader.onload = (event) => {
@@ -234,14 +233,15 @@ export default function Dashboard() {
             });
           };
           reader.readAsDataURL(blob);
-          break;
+          return;
         }
       }
-    };
-
-    document.addEventListener("paste", handlePaste as EventListener);
-    return () => document.removeEventListener("paste", handlePaste as EventListener);
-  }, [currentSessionId, createMessage, toast]);
+      toast({ title: "No image", description: "No image found in clipboard", variant: "destructive" });
+    } catch (error) {
+      console.error("Failed to read clipboard:", error);
+      toast({ title: "Error", description: "Failed to access clipboard. Try uploading instead.", variant: "destructive" });
+    }
+  };
 
   const handleCreateSession = () => {
     const title = `Session ${new Date().toLocaleTimeString()}`;
@@ -509,8 +509,19 @@ export default function Dashboard() {
               size="icon" 
               className="shrink-0 rounded-sm h-12 w-12 border-dashed"
               onClick={() => fileInputRef.current?.click()}
+              title="Upload screenshot"
             >
               <Upload className="w-5 h-5" />
+            </Button>
+
+            <Button 
+              variant="outline"
+              size="icon"
+              className="shrink-0 rounded-sm h-12 w-12 border-dashed"
+              onClick={handlePasteScreenshot}
+              title="Paste screenshot from clipboard"
+            >
+              <Copy className="w-5 h-5" />
             </Button>
             
             <div className="flex-1 relative">
@@ -518,7 +529,7 @@ export default function Dashboard() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ask L2 Coach... (or paste screenshot with Ctrl+V)"
+                placeholder="Ask L2 Coach..."
                 className="h-12 bg-background/50 border-border rounded-sm"
               />
             </div>

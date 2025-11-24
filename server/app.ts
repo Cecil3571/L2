@@ -64,12 +64,22 @@ export default async function runApp(
 ) {
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status = typeof err === "object" && err !== null && "status" in err
+      ? Number((err as Record<string, unknown>).status) || 500
+      : typeof err === "object" && err !== null && "statusCode" in err
+        ? Number((err as Record<string, unknown>).statusCode) || 500
+        : 500;
 
-    res.status(status).json({ message });
-    throw err;
+    const message = err instanceof Error && err.message
+      ? err.message
+      : "Internal Server Error";
+
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
+
+    console.error("Unhandled error in request pipeline", err);
   });
 
   // importantly run the final setup after setting up all the other routes so

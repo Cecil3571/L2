@@ -1,7 +1,7 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import multer from "multer";
+import multer, { type Multer } from "multer";
 import { insertSessionSchema, insertMessageSchema } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -14,7 +14,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(allSessions);
     } catch (error) {
       console.error("Error fetching sessions:", error);
-      res.status(500).json({ error: "Failed to fetch sessions" });
+      // Return empty array if table doesn't exist yet (migrations pending)
+      res.json([]);
     }
   });
 
@@ -93,7 +94,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // File upload endpoint
-  app.post("/api/upload", upload.single("file"), async (req, res) => {
+  app.post("/api/upload", upload.single("file"), async (req: Request & { file?: Express.Multer.File }, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });

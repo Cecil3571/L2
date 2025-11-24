@@ -8,7 +8,6 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,70 +40,86 @@ interface Session {
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isFullReview, setIsFullReview] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch sessions
-  const { data: sessions = [] } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: async () => {
-      const res = await fetch("/api/sessions");
-      if (!res.ok) throw new Error("Failed to fetch sessions");
-      return res.json();
-    },
-  });
+  // Load sessions on mount
+  useEffect(() => {
+    const loadSessions = async () => {
+      try {
+        const res = await fetch("/api/sessions");
+        const data = await res.json();
+        setSessions(data);
+        if (data.length > 0 && !currentSessionId) {
+          setCurrentSessionId(data[0].id);
+        }
+      } catch (error) {
+        console.error("Failed to load sessions:", error);
+      }
+    };
+    loadSessions();
+  }, []);
 
-  // Fetch current session messages
-  const { data: sessionMessages = [] } = useQuery({
-    queryKey: ["messages", currentSessionId],
-    queryFn: async () => {
-      if (!currentSessionId) return [];
-      const res = await fetch(`/api/sessions/${currentSessionId}/messages`);
-      if (!res.ok) throw new Error("Failed to fetch messages");
-      return res.json();
-    },
-    enabled: !!currentSessionId,
-  });
+  // Load messages when session changes
+  useEffect(() => {
+    if (!currentSessionId) return;
+    
+    const loadMessages = async () => {
+      try {
+        const res = await fetch(`/api/sessions/${currentSessionId}/messages`);
+        if (res.ok) {
+          const data = await res.json();
+          setMessages(data);
+        }
+      } catch (error) {
+        console.error("Failed to load messages:", error);
+      }
+    };
+    loadMessages();
+  }, [currentSessionId]);
 
-  const createSessionMutation = useMutation({
-    mutationFn: async (title: string) => {
+  const createNewSession = async (title: string) => {
+    try {
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
       });
       if (!res.ok) throw new Error("Failed to create session");
-      return res.json();
-    },
-    onSuccess: (newSession) => {
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      const newSession = await res.json();
+      setSessions([newSession, ...sessions]);
       setCurrentSessionId(newSession.id);
-    },
-  });
+      setMessages([]);
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create session", variant: "destructive" });
+    }
+  };
 
-  const deleteSessionMutation = useMutation({
-    mutationFn: async (id: string) => {
+  const deleteSession = async (id: string) => {
+    try {
       const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete session");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      if (sessions.length > 0) {
-        setCurrentSessionId(sessions[0].id);
+      setSessions(sessions.filter(s => s.id !== id));
+      if (currentSessionId === id) {
+        const remaining = sessions.filter(s => s.id !== id);
+        if (remaining.length > 0) {
+          setCurrentSessionId(remaining[0].id);
+        }
       }
-    },
-  });
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to delete session", variant: "destructive" });
+    }
+  };
 
-  const createMessageMutation = useMutation({
-    mutationFn: async (msg: Omit<Message, "id">) => {
+  const createMessage = async (msg: Omit<Message, "id">) => {
+    try {
       const res = await fetch(`/api/sessions/${currentSessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,15 +134,15 @@ export default function Dashboard() {
         }),
       });
       if (!res.ok) throw new Error("Failed to create message");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages", currentSessionId] });
-    },
-  });
+      const newMsg = await res.json();
+      setMessages([...messages, newMsg]);
+    } catch (error) {
+      console.error("Failed to create message:", error);
+    }
+  };
 
-  const uploadFileMutation = useMutation({
-    mutationFn: async (file: File) => {
+  const uploadFile = async (file: File) => {
+    try {
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/upload", {
@@ -135,21 +150,12 @@ export default function Dashboard() {
         body: formData,
       });
       if (!res.ok) throw new Error("Failed to upload file");
-      return res.json();
-    },
-  });
-
-  // Sync local messages with server state
-  useEffect(() => {
-    setMessages(sessionMessages);
-  }, [sessionMessages]);
-
-  // Initialize first session on load
-  useEffect(() => {
-    if (sessions.length > 0 && !currentSessionId) {
-      setCurrentSessionId(sessions[0].id);
+      return await res.json();
+    } catch (error) {
+      console.error("Failed to upload file:", error);
+      return null;
     }
-  }, [sessions, currentSessionId]);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -157,9 +163,9 @@ export default function Dashboard() {
     }
   }, [messages, isTyping]);
 
-  const createNewSession = () => {
+  const handleCreateSession = () => {
     const title = `Session ${new Date().toLocaleTimeString()}`;
-    createSessionMutation.mutate(title);
+    createNewSession(title);
   };
 
   const handleSend = async () => {
@@ -173,7 +179,7 @@ export default function Dashboard() {
       timestamp: new Date().toISOString(),
     };
 
-    await createMessageMutation.mutateAsync(userMsg);
+    await createMessage(userMsg);
     setInput("");
     processCoachResponse(userMsg);
   };
@@ -182,25 +188,25 @@ export default function Dashboard() {
     const file = e.currentTarget.files?.[0];
     if (!file || !currentSessionId) return;
 
-    try {
-      const uploadResult = await uploadFileMutation.mutateAsync(file);
-      
-      const userMsg = {
-        sessionId: currentSessionId,
-        role: "user" as const,
-        content: `Analyzing screenshot: ${file.name}...`,
-        type: "image" as const,
-        imageUrl: uploadResult.url,
-        imageData: uploadResult.url,
-        timestamp: new Date().toISOString(),
-      };
-
-      await createMessageMutation.mutateAsync(userMsg);
-      processCoachResponse(userMsg);
-      toast({ title: "Screenshot uploaded", description: `Processing ${file.name}...` });
-    } catch (error) {
+    const uploadResult = await uploadFile(file);
+    if (!uploadResult) {
       toast({ title: "Upload failed", description: "Could not upload file", variant: "destructive" });
+      return;
     }
+    
+    const userMsg = {
+      sessionId: currentSessionId,
+      role: "user" as const,
+      content: `Analyzing screenshot: ${file.name}...`,
+      type: "image" as const,
+      imageUrl: uploadResult.url,
+      imageData: uploadResult.url,
+      timestamp: new Date().toISOString(),
+    };
+
+    await createMessage(userMsg);
+    processCoachResponse(userMsg);
+    toast({ title: "Screenshot uploaded", description: `Processing ${file.name}...` });
   };
 
   const handleSimulateScenario = async (scenario: Scenario) => {
@@ -216,11 +222,11 @@ export default function Dashboard() {
       timestamp: new Date().toISOString(),
     };
 
-    await createMessageMutation.mutateAsync(userMsg);
+    await createMessage(userMsg);
     processCoachResponse(userMsg, scenario);
   };
 
-  const processCoachResponse = async (userMsg: any, scenario?: Scenario) => {
+  const processCoachResponse = (userMsg: any, scenario?: Scenario) => {
     setIsTyping(true);
 
     setTimeout(async () => {
@@ -228,16 +234,16 @@ export default function Dashboard() {
         ? (isFullReview ? scenario.fullResponse : scenario.tldrResponse)
         : generateGenericResponse(userMsg.content, isFullReview);
 
-      const coachMsg = {
+      const coachMsg: Omit<Message, "id"> = {
         sessionId: currentSessionId,
-        role: "coach" as const,
+        role: "coach",
         content: responseContent,
-        type: "analysis" as const,
-        mode: (isFullReview ? "full" : "tldr") as const,
+        type: "analysis",
+        mode: isFullReview ? "full" : "tldr",
         timestamp: new Date().toISOString(),
       };
 
-      await createMessageMutation.mutateAsync(coachMsg);
+      await createMessage(coachMsg);
       setIsTyping(false);
     }, 1200);
   };
@@ -285,7 +291,7 @@ export default function Dashboard() {
             size="icon" 
             variant="ghost"
             className="h-6 w-6 hover:bg-primary/10 hover:text-primary rounded-sm"
-            onClick={createNewSession}
+            onClick={handleCreateSession}
           >
             <Plus className="w-4 h-4" />
           </Button>
@@ -311,7 +317,7 @@ export default function Dashboard() {
                   className="w-full h-5 mt-2 text-[10px] text-destructive opacity-0 group-hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteSessionMutation.mutate(session.id);
+                    deleteSession(session.id);
                   }}
                 >
                   <Trash2 className="w-3 h-3 mr-1" /> Delete

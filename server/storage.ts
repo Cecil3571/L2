@@ -1,5 +1,5 @@
-import { db } from "./db";
-import { sessions, messages, type Session, type Message, type InsertSession, type InsertMessage } from "@shared/schema";
+import { db } from "./db.js";
+import { type Session, type Message, type InsertSession, type InsertMessage, sessions, messages } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {

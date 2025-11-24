@@ -163,6 +163,48 @@ export default function Dashboard() {
     }
   }, [messages, isTyping]);
 
+  // Handle paste events for screenshots
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      if (!currentSessionId) return;
+      
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (!blob) return;
+
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+            const imageData = event.target?.result as string;
+            
+            const userMsg = {
+              sessionId: currentSessionId,
+              role: "user" as const,
+              content: "Analyzing pasted screenshot...",
+              type: "image" as const,
+              imageUrl: imageData,
+              imageData: imageData,
+              timestamp: new Date().toISOString(),
+            };
+
+            await createMessage(userMsg);
+            processCoachResponse(userMsg);
+            toast({ title: "Screenshot pasted", description: "Processing image..." });
+          };
+          reader.readAsDataURL(blob);
+          break;
+        }
+      }
+    };
+
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [currentSessionId]);
+
   const handleCreateSession = () => {
     const title = `Session ${new Date().toLocaleTimeString()}`;
     createNewSession(title);
@@ -471,7 +513,7 @@ export default function Dashboard() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ask L2 Coach..."
+                placeholder="Ask L2 Coach... (or paste screenshot with Ctrl+V)"
                 className="h-12 bg-background/50 border-border rounded-sm"
               />
             </div>

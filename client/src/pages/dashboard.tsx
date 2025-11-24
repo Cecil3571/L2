@@ -173,9 +173,34 @@ export default function Dashboard() {
     setIsTyping(true);
 
     setTimeout(async () => {
-      const responseContent = scenario 
-        ? (isFullReview ? scenario.fullResponse : scenario.tldrResponse)
-        : generateGenericResponse(userMsg.content, isFullReview);
+      let responseContent: string;
+
+      if (scenario) {
+        responseContent = isFullReview ? scenario.fullResponse : scenario.tldrResponse;
+      } else if (userMsg.type === "image" && userMsg.imageData) {
+        // Use AI vision analysis for real screenshots
+        try {
+          const analysisRes = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              imageData: userMsg.imageData,
+              mode: isFullReview ? "full" : "tldr",
+            }),
+          });
+          if (analysisRes.ok) {
+            const analysisData = await analysisRes.json();
+            responseContent = analysisData.analysis || "Unable to analyze screenshot";
+          } else {
+            responseContent = "Error analyzing screenshot. Try uploading a clearer L2 image.";
+          }
+        } catch (error) {
+          console.error("Analysis failed:", error);
+          responseContent = "Error analyzing screenshot. Please try again.";
+        }
+      } else {
+        responseContent = generateGenericResponse(userMsg.content, isFullReview);
+      }
 
       const coachMsg: Omit<Message, "id"> = {
         sessionId: currentSessionId,
